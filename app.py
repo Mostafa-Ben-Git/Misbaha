@@ -22,35 +22,22 @@ if len(sys.argv) > 1 and sys.argv[1] == "build":
         import PyInstaller.__main__
 
     script_path = os.path.abspath(__file__)
+    script_dir = os.path.dirname(script_path)
+    icon_path = os.path.join(script_dir, "asset", "icon.ico")
+    audio_path = os.path.join(script_dir, "asset", "audio.wav")
 
-    # Check if icon file exists
-    icon_path = "asset/icon.ico"
-    if not os.path.exists(icon_path):
-        print("Warning: asset/icon.ico not found. Building without icon.")
-        pyinstaller_args = [
-            script_path,
-            "--onefile",  # Create a single executable file
-            "--windowed",  # No console window (useful for GUI apps)
-            "--noconfirm",  # Overwrite output files without confirmation
-            "--add-data",
-            "asset/audio.wav;.",  # Include asset/audio.wav in the bundle
-            "--name",
-            "Misbaha",
-        ]
-    else:
-        pyinstaller_args = [
-            script_path,
-            "--onefile",  # Create a single executable file
-            "--windowed",  # No console window (useful for GUI apps)
-            "--icon=asset/icon.ico",  # Specify an icon file
-            "--noconfirm",  # Overwrite output files without confirmation
-            "--add-data",
-            "asset/audio.wav;.",  # Include asset/audio.wav in the bundle
-            "--add-data",
-            "asset/icon.ico;.",  # Include asset/icon.ico in the bundle
-            "--name",
-            "Misbaha",
-        ]
+    pyinstaller_args = [
+        script_path,
+        "--onefile",
+        "--windowed",
+        f"--icon={icon_path}",
+        "--add-data",
+        f"{audio_path};asset",
+        "--add-data",
+        f"{icon_path};asset",
+        "--name",
+        "Misbaha",
+    ]
     print("Building with PyInstaller...")
     PyInstaller.__main__.run(pyinstaller_args)
     sys.exit(0)
@@ -247,8 +234,10 @@ def get_config_path():
 def get_resource_path(filename):
     """Get path to bundled resource (works for both dev and PyInstaller)."""
     if getattr(sys, "frozen", False):
+        # Running as compiled .exe - files are in temp directory (sys._MEIPASS)
         base_path = sys._MEIPASS
     else:
+        # Running as script - files are relative to this script's directory
         base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, filename)
 
@@ -335,6 +324,7 @@ class TasbihCounter:
 
         # Build UI
         self.build_ui()
+        self.app.update()
         self.start_listener()
         self.app.protocol("WM_DELETE_WINDOW", self.on_closing)
         self._tick()
