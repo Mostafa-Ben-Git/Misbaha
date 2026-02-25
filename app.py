@@ -8,6 +8,14 @@ import threading
 import time
 from datetime import datetime
 
+try:
+    import pystray
+    from PIL import Image, ImageDraw
+
+    TRAY_AVAILABLE = True
+except ImportError:
+    TRAY_AVAILABLE = False
+
 # ═══════════════════════════════════════════════════════════════════════════
 # PYINSTALLER BUILD SUPPORT
 # ═══════════════════════════════════════════════════════════════════════════
@@ -37,6 +45,10 @@ if len(sys.argv) > 1 and sys.argv[1] == "build":
         f"{icon_path};asset",
         "--name",
         "Misbaha",
+        "--hidden-import",
+        "pystray._win32",
+        "--hidden-import",
+        "PIL._tkinter_finder",
     ]
     print("Building with PyInstaller...")
     PyInstaller.__main__.run(pyinstaller_args)
@@ -180,6 +192,13 @@ TRANSLATIONS = {
         "light_mode": "☀️  Light Mode",
         "language": "Language",
         "load": "Load",
+        "tray_show": "Show Misbaha",
+        "tray_hide": "Hide to Tray",
+        "tray_quit": "Quit",
+        "tray_minimized": "Misbaha running in background",
+        "tray_minimized_msg": "Click the tray icon to restore.",
+        "cycle_done_title": "Cycle Complete! 🎉",
+        "cycle_done_msg": "You completed a full round of \n{dhikr}.",
     },
     "ar": {
         "app_title": "مسبحة",
@@ -220,6 +239,13 @@ TRANSLATIONS = {
         "light_mode": "☀️  الوضع الفاتح",
         "language": "اللغة",
         "load": "تحميل",
+        "tray_show": "إظهار المسبحة",
+        "tray_hide": "إخفاء في الحاوية",
+        "tray_quit": "خروج",
+        "tray_minimized": "المسبحة تعمل في الخلفية",
+        "tray_minimized_msg": "انقر على أيقونة الحاوية للاستعادة.",
+        "cycle_done_title": "اكتملت الدورة! 🎉",
+        "cycle_done_msg": "لقد أتممت دورة كاملة من \n{dhikr}.",
     },
 }
 
@@ -247,13 +273,6 @@ def play_beep():
 
     def _play():
         if sys.platform == "win32":
-            try:
-                import winsound
-
-                winsound.Beep(880, 120)
-                return
-            except Exception:
-                pass
 
             try:
                 import winsound
@@ -298,6 +317,9 @@ class TasbihCounter:
         self._save_job = None
         self.lang = "en"
         self.dark_mode = True
+        self.tray_icon = None
+        self._tray_thread = None
+        self._window_hidden = False  # tracks whether window is minimized to tray
 
         # Load settings before UI setup
         self.load_settings()
@@ -327,7 +349,11 @@ class TasbihCounter:
         self.app.update()
         self.start_listener()
         self.app.protocol("WM_DELETE_WINDOW", self.on_closing)
+        # Minimize → hide to tray
+        self.app.bind("<Unmap>", self._on_minimize)
         self._tick()
+        # Start system tray in background
+        self.setup_tray()
 
     # ════════════════════════════════════════
     # TRANSLATION
@@ -852,7 +878,20 @@ class TasbihCounter:
 
         if cycle_done:
             self._animate_cycle_complete()
-            threading.Thread(target=play_beep, daemon=True).start()
+            if self._window_hidden and TRAY_AVAILABLE and self.tray_icon:
+                # App is in background → use tray notification (its sound = the alert)
+                title = self.t("cycle_done_title")
+                msg = self.t("cycle_done_msg").format(
+                    dhikr=self.current_dhikr["arabic"]
+                )
+                threading.Thread(
+                    target=self.tray_icon.notify,
+                    args=(msg, title),
+                    daemon=True,
+                ).start()
+            else:
+                # App is visible → play custom beep only
+                threading.Thread(target=play_beep, daemon=True).start()
 
     def _update_cycle_label(self):
         elapsed = int((time.time() - self.start_ts) / 60)
@@ -1316,6 +1355,71 @@ class TasbihCounter:
         self._save_job = self.app.after(600, self.save_settings)
 
     # ══════════════════════════════════════
+    # SYSTEM TRAY
+    # ══════════════════════════════════════
+    def setup_tray(self):
+        if not TRAY_AVAILABLE:
+            return
+
+        def create_image():
+            # Try to load icon.ico, fallback to generated green circle
+            icon_path = get_resource_path("asset/icon.ico")
+            if os.path.exists(icon_path):
+                return Image.open(icon_path)
+
+            # Fallback icon
+            img = Image.new("RGB", (64, 64), color=(5, 150, 105))  # GREEN_DARK
+            d = ImageDraw.Draw(img)
+            d.ellipse([10, 10, 54, 54], fill=(16, 185, 129))  # GREEN_MID
+            return img
+
+        def on_open(icon, item):
+            self.restore_from_tray()
+
+        def on_exit(icon, item):
+            icon.stop()
+            self.app.after(0, self.quit_app)
+
+        menu = pystray.Menu(
+            pystray.MenuItem(lambda item: self.t("tray_show"), on_open, default=True),
+            pystray.MenuItem(lambda item: self.t("tray_quit"), on_exit),
+        )
+
+        self.tray_icon = pystray.Icon("Misbaha", create_image(), "Misbaha", menu)
+        self._tray_thread = threading.Thread(target=self.tray_icon.run, daemon=True)
+        self._tray_thread.start()
+
+    def hide_to_tray(self):
+        self._window_hidden = True
+        self.app.withdraw()
+        if TRAY_AVAILABLE and self.tray_icon:
+            title = self.t("tray_minimized")
+            msg = self.t("tray_minimized_msg")
+            threading.Thread(
+                target=self.tray_icon.notify,
+                args=(msg, title),
+                daemon=True,
+            ).start()
+
+    def restore_from_tray(self):
+        self._window_hidden = False
+        self.app.after(0, self.app.deiconify)
+        self.app.after(100, self.app.focus_force)
+
+    def quit_app(self):
+        self.save_settings()
+        for listener in (self.mouse_listener, self.keyboard_listener):
+            if listener:
+                try:
+                    listener.stop()
+                except:
+                    pass
+        if self.tray_icon:
+            self.tray_icon.stop()
+        self.app.quit()
+        sys.exit(0)
+
+    # ══════════════════════════════════════
     # HELPERS
     # ══════════════════════════════════════
     @staticmethod
@@ -1325,15 +1429,16 @@ class TasbihCounter:
         y = (win.winfo_screenheight() - h) // 2
         win.geometry(f"+{x}+{y}")
 
+    def _on_minimize(self, event):
+        """Called when the window is iconified (minimized). Hide to tray instead."""
+        # Only act on the root window event, and only if not already hidden
+        if event.widget is self.app and not self._window_hidden:
+            # Use after() to let tkinter finish the minimize first
+            self.app.after(50, self.hide_to_tray)
+
     def on_closing(self):
-        self.save_settings()
-        for listener in (self.mouse_listener, self.keyboard_listener):
-            if listener:
-                try:
-                    listener.stop()
-                except Exception:
-                    pass
-        self.app.destroy()
+        """X button → quit entirely."""
+        self.quit_app()
 
     def run(self):
         self.app.mainloop()

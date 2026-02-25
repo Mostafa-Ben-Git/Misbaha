@@ -31,6 +31,8 @@ It lets you **keep counting your dhikr without leaving whatever app you are usin
   See current cycle progress, total count, and how many cycles you have completed.
 - **Session saving**:  
   Save, load, and delete sessions so you can come back to a dhikr later.
+- **Tray & notifications**:  
+  Minimize Misbaha to the **system tray**, get a **notification when a cycle completes** while it’s hidden, and restore or quit from the tray menu.
 
 ---
 
@@ -112,6 +114,10 @@ The main window should open and start listening for the middle mouse button.
    - Toggle **dark/light theme**.
    - Switch **language** between English and Arabic.
    - **Save sessions** and reload them later from the sessions card.
+7. Tray behavior:
+   - **Minimize** the window to hide Misbaha to the system tray.
+   - While hidden, finishing a cycle shows a **desktop notification** instead of just a beep.
+   - Click the tray icon (or use its menu) to **show** Misbaha again, or choose **Quit** to fully exit.
 
 ---
 
